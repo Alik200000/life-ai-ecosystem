@@ -1,0 +1,32 @@
+# Git ignore for Life AI Ecosystem
+
+# Python & Bot
+bot/__pycache__/
+bot/*.py[cod]
+bot/*$py.class
+bot/.venv/
+bot/venv/
+bot/ENV/
+bot/.env
+bot/assistant.db
+*.db-journal
+
+# Flutter & Dart
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/build/
+frontend/.idea/
+frontend/*.iml
+frontend/android/local.properties
+frontend/ios/.symlinks/
+frontend/ios/Pods/
+frontend/ios/Flutter/Flutter.framework
+frontend/ios/Flutter/Flutter.podspec
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
