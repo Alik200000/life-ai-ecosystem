@@ -78,6 +78,14 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> testApplePaySync() async {
+    final ok = await _storage.sendTestApplePayExpense();
+    if (ok) {
+      await syncExpenses();
+    }
+    return ok;
+  }
+
   Future<void> addExpense(Expense expense) async {
     _expenses.insert(0, expense);
     await _storage.saveExpenses(_expenses);

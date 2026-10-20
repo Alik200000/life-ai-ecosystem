@@ -71,7 +71,25 @@ class StorageService {
     return local;
   }
 
-  // ─── Tasks ──────────────────────────────────────────────────────────────────
+  Future<bool> sendTestApplePayExpense({double amount = 260.0, String merchant = 'Apple Pay Kaspi'}) async {
+    try {
+      final syncUrl = await getSyncUrl();
+      if (syncUrl.trim().isEmpty) return false;
+      final uri = Uri.parse(syncUrl);
+      final shortcutUri = uri.replace(
+        path: '/api/shortcut/pay',
+        queryParameters: {
+          'amount': amount.toStringAsFixed(0),
+          'merchant': merchant,
+          'currency': '₸',
+        },
+      );
+      final res = await http.get(shortcutUri).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
   Future<void> saveTasks(List<Task> tasks) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonList = tasks.map((t) => jsonEncode(t.toJson())).toList();

@@ -7,7 +7,7 @@ import threading
 import requests
 import telebot
 from telebot import types
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8906685761:AAFr-u6JvXQPJBSOxBO17fSeAFDyEbFpvBg')
@@ -172,6 +172,326 @@ def api_delete_expense(exp_id):
     conn.commit()
     conn.close()
     return jsonify({'status': 'deleted'})
+
+@app.route('/api/shortcut/pay', methods=['GET', 'POST'])
+@app.route('/api/pay', methods=['GET', 'POST'])
+def api_shortcut_pay():
+    raw_amount = None
+    raw_merchant = None
+    raw_currency = None
+    raw_card = None
+    user_id = 6456555935
+
+    if request.is_json and request.json:
+        data = request.json
+        raw_amount = data.get('amount')
+        raw_merchant = data.get('merchant') or data.get('title')
+        raw_currency = data.get('currency')
+        raw_card = data.get('card')
+        user_id = data.get('user_id', user_id)
+    else:
+        raw_amount = request.args.get('amount')
+        raw_merchant = request.args.get('merchant') or request.args.get('title')
+        raw_currency = request.args.get('currency')
+        raw_card = request.args.get('card')
+        user_id = request.args.get('user_id', user_id)
+        combined_text = request.args.get('text') or request.args.get('query')
+        if combined_text and not raw_amount:
+            match = re.search(r'(\d+(?:[\.,]\d+)?)', combined_text)
+            if match:
+                raw_amount = match.group(1)
+                raw_merchant = combined_text[match.end():].strip()
+
+    if not raw_amount:
+        return jsonify({
+            'status': 'error',
+            'message': 'Не указана сумма расхода. Пример: /api/shortcut/pay?amount=260&merchant=Магазин'
+        }), 400
+
+    amount_str = str(raw_amount).replace(' ', '').replace(',', '.')
+    num_match = re.search(r'(\d+(?:\.\d+)?)', amount_str)
+    if not num_match:
+        return jsonify({
+            'status': 'error',
+            'message': f'Не удалось распознать сумму: {raw_amount}'
+        }), 400
+
+    try:
+        amount = float(num_match.group(1))
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Некорректный формат суммы'}), 400
+
+    text_to_check = f"{raw_amount} {raw_merchant or ''} {raw_currency or ''}".lower()
+    is_kzt = any(c in text_to_check for c in ['тг', '₸', 'kzt', 'тенге']) or not any(c in text_to_check for c in ['руб', '₽', 'rub', 'usd', '$', 'eur', '€'])
+    currency = "₸" if is_kzt else "₽"
+    if '$' in text_to_check or 'usd' in text_to_check:
+        currency = "$"
+    elif '€' in text_to_check or 'eur' in text_to_check:
+        currency = "€"
+
+    merchant = str(raw_merchant or '').strip()
+    merchant = re.sub(r'^(?:[/\\|\s-]+)', '', merchant)
+    merchant = re.sub(r'(?:тг|₸|kzt|тенге|руб|рублей|₽|rub)\b', '', merchant, flags=re.IGNORECASE).strip()
+    merchant = re.sub(r'^(?:[/\\|\s-]+)', '', merchant).strip()
+
+    if not merchant or merchant.lower() in ['none', 'null', 'undefined']:
+        merchant = "Apple Pay"
+
+    category = auto_detect_category(merchant)
+
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
+        user_id = 6456555935
+
+    add_expense(user_id, amount, category, merchant)
+    total = get_monthly_total(user_id)
+
+    telegram_delivered = False
+    try:
+        notif = (
+            f"⚡ **Оплата Apple Pay зафиксирована!**\n\n"
+            f"• Сумма: **{amount:.2f} {currency}**\n"
+            f"• Продавец: **{merchant}**\n"
+            f"• Категория: **{category}**\n"
+        )
+        if raw_card:
+            notif += f"• Карта: **{raw_card}**\n"
+        notif += (
+            f"\n📈 Всего за месяц: **{total:.2f} {currency}**\n"
+            f"✨ Синхронизировано с приложением ЖизньАИ"
+        )
+        bot.send_message(user_id, notif, parse_mode='Markdown')
+        telegram_delivered = True
+    except Exception as e:
+        print(f"Telegram notification error: {e}")
+
+    return jsonify({
+        'status': 'success',
+        'message': 'Расход успешно записан и синхронизирован',
+        'expense': {
+            'amount': amount,
+            'currency': currency,
+            'merchant': merchant,
+            'category': category,
+            'user_id': user_id,
+            'monthly_total': total
+        },
+        'telegram_notified': telegram_delivered
+    }), 200
+
+@app.route('/shortcut', methods=['GET'])
+def shortcut_portal():
+    host = request.host_url.rstrip('/')
+    sample_url = f"{host}/api/shortcut/pay?amount=[Сумма]&merchant=[Продавец]"
+    html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Синхронизация Apple Pay и Команд iOS — ЖизньАИ</title>
+  <style>
+    :root {{
+      --bg: #0b0f19;
+      --card-bg: rgba(23, 32, 54, 0.75);
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+      --success: #10b981;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #1e1b4b, var(--bg));
+      color: var(--text);
+      margin: 0;
+      padding: 24px 16px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }}
+    .container {{
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      max-width: 580px;
+      width: 100%;
+      padding: 32px 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    }}
+    .badge {{
+      display: inline-block;
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }}
+    h1 {{
+      font-size: 26px;
+      margin: 0 0 10px 0;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }}
+    p.desc {{
+      color: var(--subtext);
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0 0 24px 0;
+    }}
+    .card {{
+      background: rgba(11, 15, 25, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }}
+    .card-title {{
+      font-size: 14px;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 10px;
+    }}
+    .url-box {{
+      display: flex;
+      gap: 8px;
+      background: #030712;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 8px 12px;
+      align-items: center;
+    }}
+    input.url-input {{
+      background: transparent;
+      border: none;
+      color: #38bdf8;
+      font-family: monospace;
+      font-size: 12px;
+      width: 100%;
+      outline: none;
+    }}
+    button.btn {{
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }}
+    button.btn:hover {{
+      background: var(--accent-hover);
+    }}
+    button.btn-test {{
+      width: 100%;
+      background: linear-gradient(135deg, #059669, #10b981);
+      padding: 14px;
+      font-size: 15px;
+      margin-top: 10px;
+      border-radius: 14px;
+      box-shadow: 0 10px 20px rgba(16, 185, 129, 0.25);
+    }}
+    button.btn-test:hover {{
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }}
+    ol.steps {{
+      padding-left: 20px;
+      margin: 0;
+      color: var(--subtext);
+      font-size: 13px;
+      line-height: 1.8;
+    }}
+    ol.steps li strong {{
+      color: var(--text);
+    }}
+    .result-box {{
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 12px;
+      display: none;
+      font-size: 13px;
+      line-height: 1.5;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="text-align: center;">
+      <span class="badge">⚡ Прямой API для Команд iOS</span>
+      <h1>Apple Pay ➔ ЖизньАИ</h1>
+      <p class="desc">Автоматизация iOS «Команды» отправляет траты напрямую в базу приложения и бота. Никаких лишних текстовых сообщений в диалоге!</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔗 Персональный URL для действия «Получить содержимое URL»:</div>
+      <div class="url-box">
+        <input type="text" id="webhookUrl" class="url-input" readonly value="{sample_url}">
+        <button class="btn" onclick="copyUrl()">Копировать</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📱 4 простых шага настройки на iPhone:</div>
+      <ol class="steps">
+        <li>Откройте приложение <strong>«Команды» (Shortcuts)</strong> на iPhone.</li>
+        <li>Вкладка <strong>«Автоматизация»</strong> ➔ нажмите <strong>+</strong> ➔ выберите <strong>«Транзакция»</strong>.</li>
+        <li>Укажите карту (Любая) и выберите <strong>«Выполнять немедленно»</strong>.</li>
+        <li>Добавьте действие <strong>«Получить содержимое URL»</strong> (Get Contents of URL) со скопированной ссылкой. Замените <code>[Сумма]</code> и <code>[Продавец]</code> на переменные транзакции.</li>
+      </ol>
+    </div>
+
+    <button class="btn btn-test" onclick="sendTestExpense()">🧪 Протестировать отправку 260 ₸ прямо сейчас</button>
+    <div id="resultBox" class="result-box"></div>
+  </div>
+
+  <script>
+    function copyUrl() {{
+      const urlInput = document.getElementById('webhookUrl');
+      urlInput.select();
+      navigator.clipboard.writeText(urlInput.value);
+      alert('✅ Ссылка скопирована в буфер обмена!');
+    }}
+
+    async function sendTestExpense() {{
+      const box = document.getElementById('resultBox');
+      box.style.display = 'block';
+      box.style.background = 'rgba(99, 102, 241, 0.15)';
+      box.style.border = '1px solid rgba(99, 102, 241, 0.3)';
+      box.innerHTML = '⏳ Отправка тестовой транзакции...';
+
+      try {{
+        const res = await fetch('/api/shortcut/pay?amount=260&merchant=Apple Pay Kaspi&currency=₸');
+        const data = await res.json();
+        if (data.status === 'success') {{
+          box.style.background = 'rgba(16, 185, 129, 0.15)';
+          box.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+          box.innerHTML = '✅ <strong>Успешно!</strong> Расход 260 ₸ сохранён. Проверьте Telegram и мобильное приложение ЖизньАИ — трата уже там!';
+        }} else {{
+          box.style.background = 'rgba(239, 68, 68, 0.15)';
+          box.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+          box.innerHTML = '❌ Ошибка: ' + (data.message || 'Неизвестная ошибка');
+        }}
+      }} catch (err) {{
+        box.style.background = 'rgba(239, 68, 68, 0.15)';
+        box.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        box.innerHTML = '❌ Ошибка соединения: ' + err.message;
+      }}
+    }}
+  </script>
+</body>
+</html>
+"""
+    return render_template_string(html)
 
 def run_flask():
     port = int(os.environ.get('PORT', 5000))

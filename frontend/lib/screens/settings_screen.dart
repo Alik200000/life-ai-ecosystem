@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 
@@ -373,13 +374,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // ─── Telegram Sync Section ─────────────────────────────────────────
+          // ─── Telegram & Apple Pay Sync Section ─────────────────────────────
           _buildSection(
-            title: 'Синхронизация с Telegram ботом',
+            title: 'Синхронизация с Telegram и Apple Pay',
             icon: Icons.sync,
             children: [
               const Text(
-                'Адрес API для синхронизации расходов и команд Apple Pay:',
+                'Адрес API для синхронизации трат и команд Apple Pay:',
                 style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
               const SizedBox(height: 8),
@@ -407,6 +408,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Text(
                 'Локально: http://192.168.1.31:5000/api/expenses\nВ облаке: https://<ваше-имя>.onrender.com/api/expenses',
                 style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.phone_iphone),
+                  label: const Text('Инструкция и ссылка для Команд iOS (Apple Pay)'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => _showShortcutsDialog(context),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.flash_on, color: Colors.white),
+                  label: const Text('🧪 Проверить Apple Pay (отправить 260 ₸)', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final ok = await context.read<AppProvider>().testApplePaySync();
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(ok
+                            ? '✅ Тестовый расход 260 ₸ записан и синхронизирован!'
+                            : '⚠️ Не удалось связаться с сервером. Проверьте адрес в настройках.'),
+                        backgroundColor: ok ? const Color(0xFF10B981) : Colors.orange,
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -488,6 +527,107 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getShortcutUrl() {
+    final text = _syncUrlCtrl.text.trim();
+    if (text.isEmpty) return 'http://192.168.1.31:5000/api/shortcut/pay?amount=';
+    try {
+      final uri = Uri.parse(text);
+      final shortcut = uri.replace(path: '/api/shortcut/pay');
+      return '$shortcut?amount=';
+    } catch (_) {
+      return '$text/api/shortcut/pay?amount=';
+    }
+  }
+
+  void _showShortcutsDialog(BuildContext context) {
+    final shortcutUrl = '${_getShortcutUrl()}[Сумма]&merchant=[Продавец]';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.apple, color: Colors.white, size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Команды iOS и Apple Pay',
+                style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Автоматизация iOS «Команды» отправляет транзакции напрямую в приложение без отправки текста в чат Telegram:',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Ваш персональный URL:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: SelectableText(
+                  shortcutUrl,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF38BDF8)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Скопировать ссылку'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF6366F1),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 38),
+                ),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: shortcutUrl));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('✅ Ссылка скопирована в буфер обмена!')),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Шаги на iPhone:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '1. Откройте «Команды» ➔ вкладка «Автоматизация».\n'
+                '2. Нажмите «+» ➔ событие «Транзакция».\n'
+                '3. Выберите карту и «Выполнять немедленно».\n'
+                '4. Добавьте действие «Получить содержимое URL» и вставьте эту ссылку (подставив переменные Сумма и Продавец).',
+                style: TextStyle(fontSize: 12, color: Colors.white70, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Понятно', style: TextStyle(color: Color(0xFF6366F1))),
           ),
         ],
       ),
