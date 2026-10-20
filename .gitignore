@@ -1,6 +1,8 @@
 # Git ignore for Life AI Ecosystem
 
 # Python & Bot
+__pycache__/
+*.py[cod]
 bot/__pycache__/
 bot/*.py[cod]
 bot/*$py.class
